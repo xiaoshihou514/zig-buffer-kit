@@ -1,6 +1,6 @@
-//! Implementation of balanced Fenwick tree.
-//! A Fenwick tree stores intervals, this implementation only stores
-//! the start of the interval since intervals are next to each other.
+//! Implementation of balanced offset tree.
+//! Given a range, a BOTree stores closed intervals [x0,x1], [x1, x2], ..., [xn-1, xn].
+//! Only the start of the interval is stored since intervals are next to each other.
 //! It supports the following operations:
 //!     - get: O(log n)
 //!     - set: O(log n)
@@ -15,25 +15,26 @@ const utils = @import("utils.zig");
 const expectEqual = @import("utils.zig").expectEqual;
 
 /// Balanced Fenwick tree node
-const BFNode = struct {
+const BONode = struct {
     /// relative offset (in bytes)
     r_off: i128,
     /// relative line number
     r_lnum: i64,
     /// optional left child
-    left: ?*BFNode = null,
+    left: ?*BONode = null,
     /// optional right child
-    right: ?*BFNode = null,
+    right: ?*BONode = null,
     /// optional parent
-    parent: ?*BFNode = null,
+    parent: ?*BONode = null,
+
     const print_indent = 2;
 
-    fn printHelper(node: ?*BFNode, indent: u16) void {
+    fn printHelper(node: ?*BONode, indent: u16) void {
         for (0..indent) |_| {
             print(" ", .{});
         }
         if (node) |n| {
-            print("r_off: {}, r_lnum: {} {{\n", .{ n.r_off, n.r_lnum });
+            print("r_lnum: {}, r_off: {} {{\n", .{ n.r_lnum, n.r_off });
             printHelper(n.left, indent + print_indent);
             printHelper(n.right, indent + print_indent);
             for (0..indent) |_| {
@@ -45,19 +46,20 @@ const BFNode = struct {
         }
     }
 
-    pub fn printONode(node: *BFNode) void {
+    /// print structure of tree to stderr
+    pub fn printONode(node: *BONode) void {
         print("\n", .{});
         printHelper(node, 0);
     }
 
-    fn bufPrintHelper(node: ?*BFNode, indent: u16, buf: []u8) ![]u8 {
+    fn bufPrintHelper(node: ?*BONode, indent: u16, buf: []u8) ![]u8 {
         var b = buf;
         for (0..indent) |_| {
             _ = try std.fmt.bufPrint(b, " ", .{});
             b = b[1..];
         }
         if (node) |n| {
-            var s = try std.fmt.bufPrint(b, "r_off: {}, r_lnum: {} {{\n", .{ n.r_off, n.r_lnum });
+            var s = try std.fmt.bufPrint(b, "r_lnum: {}, r_off: {} {{\n", .{ n.r_lnum, n.r_off });
             b = b[s.len..];
             b = try bufPrintHelper(n.left, indent + print_indent, b);
             b = try bufPrintHelper(n.right, indent + print_indent, b);
@@ -74,27 +76,140 @@ const BFNode = struct {
         return b;
     }
 
-    pub fn bufPrintONode(node: *BFNode, buf: []u8) !void {
+    /// print structure of tree to buffer
+    pub fn bufPrintONode(node: *BONode, buf: []u8) !void {
         _ = try bufPrintHelper(node, 0, buf);
+    }
+
+    pub fn insert_node(self: *BONode, offset: u64, lnum: u32, oacc: i128, lacc: i64, allocator: Allocator) !*BONode {
+        const lnum_acc = lacc + self.r_lnum;
+        const off_acc = oacc + self.r_off;
+        if (off_acc > offset) {
+            // go left
+            if (self.left) |left| {
+                self.left = try insert_node(left, offset, lnum, off_acc, lnum_acc, allocator);
+            } else {
+                // insert right here
+                self.left = try allocator.create(BONode);
+                self.left.?.* = BONode{
+                    .r_lnum = lnum - lnum_acc,
+                    .r_off = offset - off_acc,
+                    .parent = self,
+                };
+            }
+        } else if (off_acc < offset) {
+            // go right
+            if (self.right) |right| {
+                self.right = try insert_node(right, offset, lnum, off_acc, lnum_acc, allocator);
+            } else {
+                // insert right here
+                self.right = try allocator.create(BONode);
+                self.right.?.* = BONode{
+                    .r_lnum = lnum - lnum_acc,
+                    .r_off = offset - off_acc,
+                    .parent = self,
+                };
+            }
+        } else {
+            unreachable;
+        }
+        const bf = height(self.left) - height(self.right);
+        if (bf > 1 and lnum < lnum_acc + self.left.?.r_lnum) {
+            return self.rotate_right();
+        }
+        if (bf < -1 and lnum > lnum_acc + self.right.?.r_lnum) {
+            return self.rotate_left();
+        }
+        if (bf > 1 and lnum > lnum_acc + self.left.?.r_lnum) {
+            self.left = self.left.?.rotate_left();
+            return self.rotate_right();
+        }
+        if (bf < -1 and lnum < lnum_acc + self.right.?.r_lnum) {
+            self.right = self.right.?.rotate_right();
+            return self.rotate_left();
+        }
+        return self;
+    }
+
+    /// gets height of tree
+    pub fn height(self: ?*BONode) i64 {
+        if (self) |it| {
+            return @max(height(it.left), height(it.right)) + 1;
+        } else {
+            return 0;
+        }
+    }
+
+    fn rotate_left(self: *BONode) *BONode {
+        print("rotate left\n", .{});
+        const B = self.right.?;
+        const Y = B.left;
+        B.left = self;
+        self.right = Y;
+
+        const Boff = B.r_off + self.r_off;
+        const Blnum = B.r_lnum + self.r_lnum;
+        const off = -B.r_off;
+        const lnum = -B.r_lnum;
+
+        if (Y) |y| {
+            y.r_off += B.r_off;
+            y.r_lnum += B.r_lnum;
+        }
+
+        B.r_off = Boff;
+        B.r_lnum = Blnum;
+        self.r_off = off;
+        self.r_lnum = lnum;
+
+        return B;
+    }
+
+    fn rotate_right(self: *BONode) *BONode {
+        print("rotate right\n", .{});
+        const A = self.left.?;
+        const Y = A.right;
+        A.right = self;
+        self.left = Y;
+
+        const Aoff = A.r_off + self.r_off;
+        const Alnum = A.r_lnum + self.r_lnum;
+        const off = -A.r_off;
+        const lnum = -A.r_lnum;
+
+        if (Y) |y| {
+            y.r_off += A.r_off;
+            y.r_lnum += A.r_lnum;
+        }
+
+        A.r_off = Aoff;
+        A.r_lnum = Alnum;
+        self.r_off = off;
+        self.r_lnum = lnum;
+
+        return A;
+    }
+
+    fn balanced(self: ?*BONode) bool {
+        if (self == null) {
+            return true;
+        }
+        return (std.math.absInt(height(self.?.left) - height(self.?.right)) catch 114514) <= 1;
     }
 };
 
-/// A balanced Fenwick tree
-const BFTree = struct {
+/// A balanced offset tree
+const BOTree = struct {
     /// root of the tree
-    root: ?*BFNode,
+    root: *BONode,
     /// max line number
     max: u32,
+    /// allocator
+    allocator: Allocator,
 
-    /// initializes BFTree from utf8 string
-    pub fn init(src: []const u8, allocator: Allocator) !BFTree {
-        // if it's empty we won't bother
-        if (src.len == 0) {
-            return BFTree{
-                .root = null,
-                .max = 0,
-            };
-        }
+    /// initializes BOTree from utf8 string encoded in LF
+    pub fn init(src: []const u8, allocator: Allocator) !BOTree {
+        try testing.expect(src.len > 0);
         // try interpret bytes as utf8
         var iter = (std.unicode.Utf8View.init(src) catch |e| switch (e) {
             error.InvalidUtf8 => {
@@ -123,21 +238,22 @@ const BFTree = struct {
             i += c.len;
         }
         // turns array into tree
-        return BFTree{
-            .root = try init_tree(list, 0, @intCast(list.items.len), 0, 0, allocator, null),
+        return BOTree{
+            .root = (try init_tree(list, 0, @intCast(list.items.len), 0, 0, allocator, null)).?,
             .max = @intCast(list.items.len),
+            .allocator = allocator,
         };
     }
 
     /// recursively initializes a tree, start inclusive, end exclusive
-    fn init_tree(offsets: std.ArrayList(u64), start: u32, end: u32, parent_r_off: i128, parent_r_lnum: i64, allocator: Allocator, parent: ?*BFNode) !?*BFNode {
+    fn init_tree(offsets: std.ArrayList(u64), start: u32, end: u32, parent_r_off: i128, parent_r_lnum: i64, allocator: Allocator, parent: ?*BONode) !?*BONode {
         if (start == end) {
             return null;
         }
-        var node = try allocator.create(BFNode);
+        var node = try allocator.create(BONode);
         const off: i128 = offsets.items[(start + end) / 2];
         const lnum: u32 = (start + end) / 2;
-        node.* = BFNode{
+        node.* = BONode{
             .r_off = off - parent_r_off,
             .r_lnum = lnum - parent_r_lnum,
             .left = try init_tree(offsets, start, lnum, off, lnum, allocator, node),
@@ -148,7 +264,7 @@ const BFTree = struct {
     }
 
     /// deinitializes the tree structure
-    fn deinit_tree(tree: ?*BFNode, allocator: Allocator) void {
+    fn deinit_tree(tree: ?*BONode, allocator: Allocator) void {
         if (tree) |t| {
             deinit_tree(t.left, allocator);
             deinit_tree(t.right, allocator);
@@ -156,17 +272,17 @@ const BFTree = struct {
         }
     }
 
-    /// deinitializes a BFTree
-    pub fn deinit(self: *BFTree, allocator: Allocator) void {
+    /// deinitializes a BOTree
+    pub fn deinit(self: *BOTree, allocator: Allocator) void {
         deinit_tree(self.root, allocator);
         self.* = undefined;
     }
 
-    pub const OutOfBoundError = error{BFTreeIndexOutOfBound};
+    pub const OutOfBoundError = error{BOTreeIndexOutOfBound};
     /// gets start of interval given the index
-    pub fn get(self: *BFTree, lnum: u32) OutOfBoundError!?u64 {
-        if (lnum > self.max) {
-            return error.BFTreeIndexOutOfBound;
+    pub fn get(self: *BOTree, lnum: u32) OutOfBoundError!?u64 {
+        if (lnum >= self.max) {
+            return error.BOTreeIndexOutOfBound;
         }
         if (lnum == 0) {
             return 0;
@@ -174,7 +290,7 @@ const BFTree = struct {
 
         var lnum_acc: i64 = 0;
         var off_acc: i128 = 0;
-        var node = self.root;
+        var node: ?*BONode = self.root;
         while (node != null) {
             off_acc += node.?.r_off;
             lnum_acc += node.?.r_lnum;
@@ -191,13 +307,13 @@ const BFTree = struct {
     }
 
     /// sets start of interval of line `lnum`
-    pub fn set(self: *BFTree, lnum: u32, off: u64) OutOfBoundError!void {
-        if (lnum > self.max or lnum == 0) {
-            return error.BFTreeIndexOutOfBound;
+    pub fn set(self: *BOTree, lnum: u32, off: u64) OutOfBoundError!void {
+        if (lnum >= self.max or lnum == 0) {
+            return error.BOTreeIndexOutOfBound;
         }
         var lnum_acc: i64 = 0;
         var off_acc: i128 = 0;
-        var node = self.root;
+        var node: ?*BONode = self.root;
         while (node != null) {
             off_acc += node.?.r_off;
             lnum_acc += node.?.r_lnum;
@@ -245,16 +361,16 @@ const BFTree = struct {
     }
 
     /// increments start of interval of line `lnum`
-    pub fn incr(self: *BFTree, lnum: u32, off: i128) OutOfBoundError!void {
-        if (lnum > self.max or lnum == 0) {
-            return error.BFTreeIndexOutOfBound;
+    pub fn incr(self: *BOTree, lnum: u32, off: i128) OutOfBoundError!void {
+        if (lnum >= self.max or lnum == 0) {
+            return error.BOTreeIndexOutOfBound;
         }
         if (off == 0) {
             return;
         }
         var lnum_acc: i64 = 0;
         var off_acc: i128 = 0;
-        var node = self.root;
+        var node: ?*BONode = self.root;
         while (node != null) {
             off_acc += node.?.r_off;
             lnum_acc += node.?.r_lnum;
@@ -298,61 +414,114 @@ const BFTree = struct {
     }
 
     /// decrements start of interval of line `lnum`
-    pub fn decr(self: *BFTree, lnum: u32, off: i128) OutOfBoundError!void {
+    pub fn decr(self: *BOTree, lnum: u32, off: i128) OutOfBoundError!void {
         try incr(self, lnum, -off);
+    }
+
+    /// adds a new offset of 0 `after` idx, preserves tree balance
+    pub fn insert(self: *BOTree, lnum: u32) !void {
+        if (lnum >= self.max) {
+            return error.BOTreeIndexOutOfBound;
+        }
+        const off = if (lnum == self.max - 1) (try get(self, lnum)).? + 1 else (try get(self, lnum + 1)).?;
+        if (lnum != self.max - 1) {
+            // shift offset and lnum for lnum + 1 onwards
+            const target = lnum + 1;
+            var lnum_acc: i64 = 0;
+            var off_acc: i128 = 0;
+            var node: ?*BONode = self.root;
+            while (node != null) {
+                off_acc += node.?.r_off;
+                lnum_acc += node.?.r_lnum;
+                if (lnum_acc == target) {
+                    break;
+                } else if (lnum_acc < target) {
+                    node = node.?.right;
+                } else {
+                    node = node.?.left;
+                }
+            }
+
+            // change in r_off
+            var child = node.?.left;
+            if (child) |c| {
+                c.r_off -= 1;
+                c.r_lnum -= 1;
+            }
+            var left = true;
+
+            // trace upwards
+            while (node.?.parent != null) {
+                child = node.?;
+                node = node.?.parent;
+                if (child == node.?.left) {
+                    // child is left of node and we reached child via its right node
+                    if (!left) {
+                        child.?.r_off -= 1;
+                        child.?.r_lnum -= 1;
+                    }
+                    left = true;
+                } else {
+                    // child is right of node and we reached child via its left node
+                    if (left) {
+                        child.?.r_off += 1;
+                        child.?.r_lnum += 1;
+                    }
+                    left = false;
+                }
+            }
+            if (left) {
+                node.?.r_off += 1;
+                node.?.r_lnum += 1;
+            }
+        }
+        self.root = try self.root.insert_node(off, lnum + 1, 0, 0, self.allocator);
+        self.max += 1;
     }
 };
 
-test "init: empty" {
-    const empty = "";
-    var bft = try BFTree.init(empty, testing.allocator);
-    defer bft.deinit(testing.allocator);
-    try expectEqual(0, bft.max);
-    try expectEqual(null, bft.root);
-}
-
-test "init: non-empty" {
+test "init: simple" {
     const src = "const\nvar\n";
-    var bft = try BFTree.init(src, testing.allocator);
+    var bft = try BOTree.init(src, testing.allocator);
     defer bft.deinit(testing.allocator);
     try expectEqual(3, bft.max);
     var expected =
-        \\r_off: 6, r_lnum: 1 {
-        \\  r_off: -6, r_lnum: -1 {
+        \\r_lnum: 1, r_off: 6 {
+        \\  r_lnum: -1, r_off: -6 {
         \\    null
         \\    null
         \\  }
-        \\  r_off: 4, r_lnum: 1 {
+        \\  r_lnum: 1, r_off: 4 {
         \\    null
         \\    null
         \\  }
         \\}
     ;
     var buf = try testing.allocator.alloc(u8, 256);
-    try BFNode.bufPrintONode(bft.root.?, buf);
+    try BONode.bufPrintONode(bft.root, buf);
     try testing.expect(std.mem.eql(u8, expected, buf[0..expected.len]));
     testing.allocator.free(buf);
 }
 
 test "init: edge cases" {
     const src = "\nzig\nc\nrust\ncpp\n";
-    var bft = try BFTree.init(src, testing.allocator);
+    var bft = try BOTree.init(src, testing.allocator);
     defer bft.deinit(testing.allocator);
     try expectEqual(6, bft.max);
     var expected =
-        \\r_off: 7, r_lnum: 3 {
-        \\  r_off: -6, r_lnum: -2 {
-        \\    r_off: -1, r_lnum: -1 {
+        \\r_lnum: 3, r_off: 7 {
+        \\  r_lnum: -2, r_off: -6 {
+        \\    r_lnum: -1, r_off: -1 {
         \\      null
         \\      null
         \\    }
-        \\    r_off: 4, r_lnum: 1 {
+        \\    r_lnum: 1, r_off: 4 {
         \\      null
         \\      null
         \\    }
         \\  }
-        \\  r_off: 9, r_lnum: 2 {
-        \\    r_off: -4, r_lnum: -1 {
+        \\  r_lnum: 2, r_off: 9 {
+        \\    r_lnum: -1, r_off: -4 {
         \\      null
         \\      null
         \\    }
@@ -361,7 +530,7 @@ test "init: edge cases" {
         \\}
     ;
     var buf = try testing.allocator.alloc(u8, 512);
-    try BFNode.bufPrintONode(bft.root.?, buf);
+    try BONode.bufPrintONode(bft.root, buf);
     try testing.expect(std.mem.eql(u8, expected, buf[0..expected.len]));
     testing.allocator.free(buf);
 }
@@ -373,7 +542,7 @@ test "get" {
     defer str.deinit();
     defer offs.deinit();
 
-    var bft = try BFTree.init(str.items, testing.allocator);
+    var bft = try BOTree.init(str.items, testing.allocator);
     defer bft.deinit(testing.allocator);
 
     const len: u32 = @intCast(offs.items.len);
@@ -390,7 +559,7 @@ test "set" {
     defer str.deinit();
     defer offs.deinit();
 
-    var bft = try BFTree.init(str.items, testing.allocator);
+    var bft = try BOTree.init(str.items, testing.allocator);
     defer bft.deinit(testing.allocator);
 
     var rng = utils.newRand();
@@ -413,7 +582,7 @@ test "incr" {
     defer str.deinit();
     defer offs.deinit();
 
-    var bft = try BFTree.init(str.items, testing.allocator);
+    var bft = try BOTree.init(str.items, testing.allocator);
     defer bft.deinit(testing.allocator);
 
     var rng = utils.newRand();
@@ -435,7 +604,7 @@ test "decr" {
     defer str.deinit();
     defer offs.deinit();
 
-    var bft = try BFTree.init(str.items, testing.allocator);
+    var bft = try BOTree.init(str.items, testing.allocator);
     defer bft.deinit(testing.allocator);
 
     var rng = utils.newRand();
@@ -448,4 +617,37 @@ test "decr" {
     for (idx..offs.items.len) |i| {
         try expectEqual(offs.items[i] + 42, bft.get(@intCast(i)));
     }
+}
+
+test "insert: once" {
+    const input = try utils.genInput(testing.allocator);
+    const str = input.str;
+    const offs = input.breaks;
+    defer str.deinit();
+    defer offs.deinit();
+
+    var bft = try BOTree.init(str.items, testing.allocator);
+    defer bft.deinit(testing.allocator);
+
+    var rng = utils.newRand();
+    const idx = rng.next() % offs.items.len;
+    try bft.insert(@intCast(idx));
+
+    const new = idx + 1;
+    if (new != offs.items.len) {
+        for (0..new) |i| {
+            try expectEqual(offs.items[i], bft.get(@intCast(i)));
+        }
+        try expectEqual(offs.items[new], bft.get(@intCast(new)));
+        for (new + 1..offs.items.len + 1) |i| {
+            try expectEqual(offs.items[i - 1] + 1, bft.get(@intCast(i)));
+        }
+    } else {
+        for (0..new) |i| {
+            try expectEqual(offs.items[i], bft.get(@intCast(i)));
+        }
+        try expectEqual(offs.items[new - 1] + 1, bft.get(@intCast(new)));
+    }
+
+    try testing.expect(bft.root.balanced());
 }

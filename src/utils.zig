@@ -13,6 +13,10 @@ pub fn newRand() std.rand.Xoshiro256 {
 /// generates a random UTF8 string with certain length, distribution is (somewhat) linear
 pub fn randomUTF8(len: u16, allocator: std.mem.Allocator, r: std.rand.Xoshiro256) !std.ArrayList(u8) {
     var list = std.ArrayList(u8).init(allocator);
+    if (len == 1) {
+        try list.append(0xA);
+        return list;
+    }
     var rng = r;
     for (0..len) |_| {
         const bytes = rng.next() % 5;
@@ -99,7 +103,31 @@ pub const TestStringStruct = struct {
 /// generates a random UTF8 string with [1..65536] length, and records all the line breaks
 pub fn genInput(allocator: std.mem.Allocator) !TestStringStruct {
     var rng = newRand();
-    const arr = try randomUTF8(@intCast(rng.next() % (1 << 16)), allocator, rng);
+    const arr = try randomUTF8(@intCast(rng.next() % (1 << 16) + 1), allocator, rng);
+
+    var iter = (try std.unicode.Utf8View.init(arr.items)).iterator();
+    var offs = std.ArrayList(u64).init(allocator);
+
+    // first line always starts at zero
+    try offs.append(0);
+    var i: u64 = 0;
+    while (iter.nextCodepointSlice()) |c| {
+        if (c.len == 1 and c[0] == '\n') {
+            // record pos of line start
+            try offs.append(i + 1);
+        }
+        i += c.len;
+    }
+    return TestStringStruct{
+        .str = arr,
+        .breaks = offs,
+    };
+}
+
+/// generates a random UTF8 string with [1..32] length, and records all the line breaks
+pub fn genSmallInput(allocator: std.mem.Allocator) !TestStringStruct {
+    var rng = newRand();
+    const arr = try randomUTF8(@intCast(rng.next() % (1 << 4) + 1), allocator, rng);
 
     var iter = (try std.unicode.Utf8View.init(arr.items)).iterator();
     var offs = std.ArrayList(u64).init(allocator);
