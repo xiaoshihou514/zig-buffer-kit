@@ -249,13 +249,57 @@ const BFTree = struct {
         if (lnum > self.max or lnum == 0) {
             return error.BFTreeIndexOutOfBound;
         }
-        // TODO
-        _ = off;
+        if (off == 0) {
+            return;
+        }
+        var lnum_acc: i64 = 0;
+        var off_acc: i128 = 0;
+        var node = self.root;
+        while (node != null) {
+            off_acc += node.?.r_off;
+            lnum_acc += node.?.r_lnum;
+            if (lnum_acc == lnum) {
+                break;
+            } else if (lnum_acc < lnum) {
+                node = node.?.right;
+            } else {
+                node = node.?.left;
+            }
+        }
+
+        // change in r_off
+        var child = node.?.left;
+        if (child) |c| {
+            c.r_off -= off;
+        }
+        var left = true;
+
+        // trace upwards
+        while (node.?.parent != null) {
+            child = node.?;
+            node = node.?.parent;
+            if (child == node.?.left) {
+                // child is left of node and we reached child via its right node
+                if (!left) {
+                    child.?.r_off -= off;
+                }
+                left = true;
+            } else {
+                // child is right of node and we reached child via its left node
+                if (left) {
+                    child.?.r_off += off;
+                }
+                left = false;
+            }
+        }
+        if (left) {
+            node.?.r_off += off;
+        }
     }
 
     /// decrements start of interval of line `lnum`
     pub fn decr(self: *BFTree, lnum: u32, off: i128) OutOfBoundError!void {
-        incr(self, lnum, -off);
+        try incr(self, lnum, -off);
     }
 };
 
@@ -353,6 +397,50 @@ test "set" {
     const idx = rng.next() % offs.items.len;
     const newOff: u64 = (try bft.get(@intCast(idx))).? + 42;
     try bft.set(@intCast(idx), newOff);
+
+    for (0..idx) |i| {
+        try expectEqual(offs.items[i], bft.get(@intCast(i)));
+    }
+    for (idx..offs.items.len) |i| {
+        try expectEqual(offs.items[i] + 42, bft.get(@intCast(i)));
+    }
+}
+
+test "incr" {
+    const input = try utils.genInput(testing.allocator);
+    const str = input.str;
+    const offs = input.breaks;
+    defer str.deinit();
+    defer offs.deinit();
+
+    var bft = try BFTree.init(str.items, testing.allocator);
+    defer bft.deinit(testing.allocator);
+
+    var rng = utils.newRand();
+    const idx = rng.next() % offs.items.len;
+    try bft.incr(@intCast(idx), 42);
+
+    for (0..idx) |i| {
+        try expectEqual(offs.items[i], bft.get(@intCast(i)));
+    }
+    for (idx..offs.items.len) |i| {
+        try expectEqual(offs.items[i] + 42, bft.get(@intCast(i)));
+    }
+}
+
+test "decr" {
+    const input = try utils.genInput(testing.allocator);
+    const str = input.str;
+    const offs = input.breaks;
+    defer str.deinit();
+    defer offs.deinit();
+
+    var bft = try BFTree.init(str.items, testing.allocator);
+    defer bft.deinit(testing.allocator);
+
+    var rng = utils.newRand();
+    const idx = rng.next() % offs.items.len;
+    try bft.decr(@intCast(idx), -42);
 
     for (0..idx) |i| {
         try expectEqual(offs.items[i], bft.get(@intCast(i)));
