@@ -6,20 +6,20 @@ pub fn expectEqual(expected: anytype, actual: anytype) !void {
 }
 
 /// returns new rng object
-pub fn newRand() std.rand.Xoshiro256 {
-    return std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+pub inline fn newRand() std.Random {
+    var rng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+    return rng.random();
 }
 
 /// generates a random UTF8 string with certain length, distribution is (somewhat) linear
-pub fn randomUTF8(len: u16, allocator: std.mem.Allocator, r: std.rand.Xoshiro256) !std.ArrayList(u8) {
+pub fn randomUTF8(len: u16, allocator: std.mem.Allocator, r: std.Random) !std.ArrayList(u8) {
     var list = std.ArrayList(u8).init(allocator);
     if (len == 1) {
         try list.append(0xA);
         return list;
     }
-    var rng = r;
     for (0..len) |_| {
-        const bytes = rng.next() % 5;
+        const bytes = r.uintAtMost(u8, 4);
         // https://datatracker.ietf.org/doc/html/rfc3629#section-4
         // UTF8-char   = UTF8-1 / UTF8-2 / UTF8-3 / UTF8-4
         // UTF8-1      = %x00-7F
@@ -32,53 +32,41 @@ pub fn randomUTF8(len: u16, allocator: std.mem.Allocator, r: std.rand.Xoshiro256
         switch (bytes) {
             0 => {
                 // 1-byte, 0xxxxxxx
-                const b1: u8 = @intCast(rng.next() % (1 << 7));
+                const b1: u8 = r.uintAtMost(u8, 0x7F);
                 try list.append(b1);
             },
             1 => {
                 // 2-byte, 110xxxxx 10xxxxxx
-                const hb1 = rng.next() % (1 << 3);
-                const hb2 = rng.next() % ((1 << 4) - 0x8) + 0x8;
-                const hb3 = rng.next() % (1 << 4);
-                const b1: u8 = @intCast(0b11000000 + (hb1 << 2) + (hb2 >> 2));
-                const b2: u8 = @intCast(0b10000000 + ((hb2 & 0b11) << 4) + hb3);
+                const b1: u8 = r.uintAtMost(u8, 0xDF - 0xC2) + 0xC2;
+                const b2: u8 = r.uintAtMost(u8, 0xBF - 0x80) + 0x80;
                 try list.append(b1);
                 try list.append(b2);
             },
             2 => {
                 // 3-byte
-                const hb1 = rng.next() % (1 << 4);
-                const b1: u8 = @intCast(0b11100000 + hb1);
+                const b1 = 0xE0 + r.uintAtMost(u8, 0xF);
 
-                const hb2 =
-                    if (b1 == 0xE0) rng.next() % ((1 << 4) - 0x8) + 0x8 // stop zig fmt
-                else if (b1 == 0xED) rng.next() % (1 << 3) // stop zig fmt
-                else rng.next() % (1 << 4);
+                const b2 = if (b1 == 0xE0) r.uintAtMost(u8, 0xBF - 0xA0) + 0xA0 //
+                else if (b1 == 0xED) r.uintAtMost(u8, 0x9F - 0x80) + 0x80 //
+                else r.uintAtMost(u8, 0xBF - 0x80) + 0x80;
 
-                const hb3 = rng.next() % (1 << 4);
-                const hb4 = rng.next() % (1 << 4);
-                const b2: u8 = @intCast(0b10000000 + (hb2 << 2) + (hb3 >> 2));
-                const b3: u8 = @intCast(0b10000000 + ((hb3 & 0b11) << 4) + hb4);
+                const b3 = r.uintAtMost(u8, 0xBF - 0x80) + 0x80;
                 try list.append(b1);
                 try list.append(b2);
                 try list.append(b3);
             },
             3 => {
                 // 4-byte
-                const hb1 = rng.next() % (1 << 4) + 1;
-                const b1: u8 = @intCast(0b11110000 + (hb1 >> 2));
+                const b1 = r.uintAtMost(u8, 0x4) + 0xF0;
 
-                const hb2 =
-                    if (b1 == 0xF0) ((rng.next() % (1 << 2)) << 2) + (rng.next() % ((1 << 2) - 1)) + 1 // stop zig fmt
-                else if (b1 == 0xF4) (rng.next() % (1 << 2)) << 2 // stop zig fmt
-                else rng.next() % (1 << 4);
+                const b2 =
+                    if (b1 == 0xF0) r.uintAtMost(u8, 0xBF - 0x90) + 0x90 //
+                else if (b1 == 0xF4) r.uintAtMost(u8, 0x8F - 0x80) + 0x80 //
+                else r.uintAtMost(u8, 0xBF - 0x80) + 0x80;
 
-                const hb3 = rng.next() % (1 << 4);
-                const hb4 = rng.next() % (1 << 4);
-                const hb5 = rng.next() % (1 << 4);
-                const b2: u8 = @intCast(0b10000000 + ((hb1 & 0b11) << 4) + hb2);
-                const b3: u8 = @intCast(0b10000000 + (hb3 << 2) + (hb4 >> 2));
-                const b4: u8 = @intCast(0b10000000 + ((hb4 & 0b11) << 4) + hb5);
+                const b3 = r.uintAtMost(u8, 0xBF - 0x80) + 0x80;
+                const b4 = r.uintAtMost(u8, 0xBF - 0x80) + 0x80;
+
                 try list.append(b1);
                 try list.append(b2);
                 try list.append(b3);
@@ -102,8 +90,8 @@ pub const TestStringStruct = struct {
 
 /// generates a random UTF8 string with [1..65536] length, and records all the line breaks
 pub fn genInput(allocator: std.mem.Allocator) !TestStringStruct {
-    var rng = newRand();
-    const arr = try randomUTF8(@intCast(rng.next() % (1 << 16) + 1), allocator, rng);
+    var r = newRand();
+    const arr = try randomUTF8(r.uintAtMost(u16, 0xFFFE) + 1, allocator, r);
 
     var iter = (try std.unicode.Utf8View.init(arr.items)).iterator();
     var offs = std.ArrayList(u64).init(allocator);
@@ -126,8 +114,8 @@ pub fn genInput(allocator: std.mem.Allocator) !TestStringStruct {
 
 /// generates a random UTF8 string with [1..32] length, and records all the line breaks
 pub fn genSmallInput(allocator: std.mem.Allocator) !TestStringStruct {
-    var rng = newRand();
-    const arr = try randomUTF8(@intCast(rng.next() % (1 << 4) + 1), allocator, rng);
+    var r = newRand();
+    const arr = try randomUTF8(r.uintAtMost(u16, 32) + 1, allocator, r);
 
     var iter = (try std.unicode.Utf8View.init(arr.items)).iterator();
     var offs = std.ArrayList(u64).init(allocator);
@@ -149,8 +137,8 @@ pub fn genSmallInput(allocator: std.mem.Allocator) !TestStringStruct {
 }
 
 test "utf-8 is valid" {
-    var rng = std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-    const arr = try randomUTF8(@intCast(rng.next() % (1 << 16)), std.testing.allocator, rng);
+    var rng = newRand();
+    const arr = try randomUTF8(rng.uintAtMost(u16, 1 << 15), std.testing.allocator, rng);
     defer arr.deinit();
     try std.testing.expect(std.unicode.utf8ValidateSlice(arr.items));
 }
