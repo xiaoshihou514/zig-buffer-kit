@@ -152,13 +152,14 @@ const BONode = struct {
     }
 
     fn rotate_left(self: *BONode) *BONode {
-        // rotate nodes
         const B = self.right.?;
         const Y = B.left;
 
+        // rotate nodes
         B.left = self;
         self.right = Y;
 
+        // fix pointers
         B.parent = self.parent;
         self.parent = B;
 
@@ -183,13 +184,14 @@ const BONode = struct {
     }
 
     fn rotate_right(self: *BONode) *BONode {
-        // rotate nodes
         const A = self.left.?;
         const Y = A.right;
 
+        // rotate nodes
         A.right = self;
         self.left = Y;
 
+        // fix pointers
         A.parent = self.parent;
         self.parent = A;
 
@@ -530,7 +532,7 @@ const BOTree = struct {
     }
 };
 
-test "init: simple" {
+test "init generates correct tree for simple string" {
     const src = "const\nvar\n";
     var bft = try BOTree.init(src, testing.allocator);
     defer bft.deinit(testing.allocator);
@@ -553,7 +555,7 @@ test "init: simple" {
     testing.allocator.free(buf);
 }
 
-test "init: edge cases" {
+test "init generates correct tree for string with 0 long lines" {
     const src = "\nzig\nc\nrust\ncpp\n";
     var bft = try BOTree.init(src, testing.allocator);
     defer bft.deinit(testing.allocator);
@@ -585,7 +587,7 @@ test "init: edge cases" {
     testing.allocator.free(buf);
 }
 
-test "get" {
+test "get is same as array" {
     const input = try utils.genInput(testing.allocator);
     const str = input.str;
     const offs = input.breaks;
@@ -603,7 +605,7 @@ test "get" {
     }
 }
 
-test "set" {
+test "set correctly updates offset" {
     const input = try utils.genInput(testing.allocator);
     const str = input.str;
     const offs = input.breaks;
@@ -629,7 +631,7 @@ test "set" {
     }
 }
 
-test "incr" {
+test "incr correctlly updates offset" {
     const input = try utils.genInput(testing.allocator);
     const str = input.str;
     const offs = input.breaks;
@@ -654,7 +656,7 @@ test "incr" {
     }
 }
 
-test "decr" {
+test "decr correctlly updates offset" {
     const input = try utils.genInput(testing.allocator);
     const str = input.str;
     const offs = input.breaks;
@@ -679,7 +681,7 @@ test "decr" {
     }
 }
 
-test "insert: once" {
+test "insert once correctly updates values and preserves balance" {
     const input = try utils.genInput(testing.allocator);
     const str = input.str;
     const offs = input.breaks;
@@ -712,7 +714,7 @@ test "insert: once" {
     try testing.expect(bft.root.balanced());
 }
 
-test "insert: many" {
+test "insert many correctly updates values and preserves balance" {
     const input = try utils.genInput(testing.allocator);
     const str = input.str;
     var offs = input.breaks;
