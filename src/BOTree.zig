@@ -150,7 +150,6 @@ const BONode = struct {
     }
 
     fn rotate_left(self: *BONode) *BONode {
-        print("rotate left\n", .{});
         const B = self.right.?;
         const Y = B.left;
         B.left = self;
@@ -175,7 +174,6 @@ const BONode = struct {
     }
 
     fn rotate_right(self: *BONode) *BONode {
-        print("rotate right\n", .{});
         const A = self.left.?;
         const Y = A.right;
         A.right = self;
@@ -295,6 +293,7 @@ const BOTree = struct {
     /// gets start of interval given the index
     pub fn get(self: *BOTree, lnum: u32) OutOfBoundError!u64 {
         if (lnum >= self.max) {
+            print("set: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
             return error.BOTreeIndexOutOfBound;
         }
         if (lnum == 0) {
@@ -322,6 +321,7 @@ const BOTree = struct {
     /// sets start of interval of line `lnum`
     pub fn set(self: *BOTree, lnum: u32, off: u64) OutOfBoundError!void {
         if (lnum >= self.max or lnum == 0) {
+            print("set: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
             return error.BOTreeIndexOutOfBound;
         }
         var lnum_acc: i64 = 0;
@@ -375,6 +375,7 @@ const BOTree = struct {
     /// increments start of interval of line `lnum`
     pub fn incr(self: *BOTree, lnum: u32, off: i128) OutOfBoundError!void {
         if (lnum >= self.max or lnum == 0) {
+            print("set: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
             return error.BOTreeIndexOutOfBound;
         }
         if (off == 0) {
@@ -433,6 +434,7 @@ const BOTree = struct {
     /// adds a new offset of 0 `after` idx, preserves tree balance
     pub fn insert(self: *BOTree, lnum: u32) !void {
         if (lnum >= self.max) {
+            print("set: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
             return error.BOTreeIndexOutOfBound;
         }
         const off = if (lnum == self.max - 1) (try get(self, lnum)) + 1 else (try get(self, lnum + 1));
@@ -566,7 +568,7 @@ test "get" {
 }
 
 test "set" {
-    const input = try utils.genSmallInput(testing.allocator);
+    const input = try utils.genInput(testing.allocator);
     const str = input.str;
     const offs = input.breaks;
     defer str.deinit();
@@ -576,7 +578,10 @@ test "set" {
     defer bft.deinit(testing.allocator);
 
     var r = utils.newRand();
-    const idx = if (offs.items.len != 1) r.intRangeAtMost(u32, 1, @intCast(offs.items.len - 1)) else 0;
+    if (offs.items.len == 1) {
+        return;
+    }
+    const idx = r.intRangeAtMost(u32, 1, @intCast(offs.items.len - 1));
     const newOff: u64 = (try bft.get(idx)) + 42;
     try bft.set(@intCast(idx), newOff);
 
@@ -599,7 +604,10 @@ test "incr" {
     defer bft.deinit(testing.allocator);
 
     var r = utils.newRand();
-    const idx = if (offs.items.len != 1) r.intRangeAtMost(u32, 1, @intCast(offs.items.len - 1)) else 0;
+    if (offs.items.len == 1) {
+        return;
+    }
+    const idx = r.intRangeAtMost(u32, 1, @intCast(offs.items.len - 1));
     try bft.incr(@intCast(idx), 42);
 
     for (0..idx) |i| {
@@ -621,7 +629,10 @@ test "decr" {
     defer bft.deinit(testing.allocator);
 
     var r = utils.newRand();
-    const idx = if (offs.items.len != 1) r.intRangeAtMost(u32, 1, @intCast(offs.items.len - 1)) else 0;
+    if (offs.items.len == 1) {
+        return;
+    }
+    const idx = r.intRangeAtMost(u32, 1, @intCast(offs.items.len - 1));
     try bft.decr(@intCast(idx), -42);
 
     for (0..idx) |i| {
