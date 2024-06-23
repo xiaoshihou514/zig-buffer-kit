@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // building
-    const lib = b.addSharedLibrary(.{
+    const lib = b.addStaticLibrary(.{
         .name = "zig-buffer-kit",
         .root_source_file = b.path("src/lib.zig"),
         .target = buildTarget,

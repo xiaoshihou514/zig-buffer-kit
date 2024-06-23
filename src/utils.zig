@@ -136,6 +136,19 @@ pub fn genSmallInput(allocator: std.mem.Allocator) !TestStringStruct {
     };
 }
 
+/// prints array list
+pub fn printArrayList(arr: std.ArrayList(u64)) void {
+    std.debug.print("[", .{});
+    for (0..arr.items.len - 1) |i| {
+        std.debug.print("{d}, ", .{arr.items[i]});
+    }
+    if (arr.getLastOrNull()) |last| {
+        std.debug.print("{d}]\n", .{last});
+    } else {
+        std.debug.print("]\n", .{});
+    }
+}
+
 test "utf-8 is valid" {
     var rng = newRand();
     const arr = try randomUTF8(rng.uintAtMost(u16, 1 << 15), std.testing.allocator, rng);

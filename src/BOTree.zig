@@ -2,9 +2,11 @@
 //! Given a range, a BOTree stores closed intervals [x0,x1], [x1, x2], ..., [xn-1, xn].
 //! Only the start of the interval is stored since intervals are next to each other.
 //! It supports the following operations:
-//!     - get: O(log n)
-//!     - set: O(log n)
-//!     - insert: O(log n)
+//!     - get(lnum)
+//!     - set(lnum, off)
+//!     - incr(lnum, delta)
+//!     - insertAfter(lnum)
+//!     - remove(lnum)
 
 const std = @import("std");
 const print = std.debug.print;
@@ -150,11 +152,17 @@ const BONode = struct {
     }
 
     fn rotate_left(self: *BONode) *BONode {
+        // rotate nodes
         const B = self.right.?;
         const Y = B.left;
+
         B.left = self;
         self.right = Y;
 
+        B.parent = self.parent;
+        self.parent = B;
+
+        // fix relative fields
         const Boff = B.r_off + self.r_off;
         const Blnum = B.r_lnum + self.r_lnum;
         const off = -B.r_off;
@@ -163,6 +171,7 @@ const BONode = struct {
         if (Y) |y| {
             y.r_off += B.r_off;
             y.r_lnum += B.r_lnum;
+            y.parent = self;
         }
 
         B.r_off = Boff;
@@ -174,11 +183,17 @@ const BONode = struct {
     }
 
     fn rotate_right(self: *BONode) *BONode {
+        // rotate nodes
         const A = self.left.?;
         const Y = A.right;
+
         A.right = self;
         self.left = Y;
 
+        A.parent = self.parent;
+        self.parent = A;
+
+        // fix relative fields
         const Aoff = A.r_off + self.r_off;
         const Alnum = A.r_lnum + self.r_lnum;
         const off = -A.r_off;
@@ -187,6 +202,7 @@ const BONode = struct {
         if (Y) |y| {
             y.r_off += A.r_off;
             y.r_lnum += A.r_lnum;
+            y.parent = self;
         }
 
         A.r_off = Aoff;
@@ -293,7 +309,7 @@ const BOTree = struct {
     /// gets start of interval given the index
     pub fn get(self: *BOTree, lnum: u32) OutOfBoundError!u64 {
         if (lnum >= self.max) {
-            print("set: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
+            print("get: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
             return error.BOTreeIndexOutOfBound;
         }
         if (lnum == 0) {
@@ -351,17 +367,20 @@ const BOTree = struct {
         var left = true;
 
         // trace upwards
+        // invariant: subtree of node is fixed
         while (node.?.parent != null) {
             child = node.?;
             node = node.?.parent;
             if (child == node.?.left) {
                 // child is left of node and we reached child via its right node
+                // in this case child.lnum < target.lnum, hence needs to be "corrected"
                 if (!left) {
                     child.?.r_off -= delta;
                 }
                 left = true;
             } else {
                 // child is right of node and we reached child via its left node
+                // in this case chidl.lnum > target.lnum, we change as required
                 if (left) {
                     child.?.r_off += delta;
                 }
@@ -375,7 +394,7 @@ const BOTree = struct {
     /// increments start of interval of line `lnum`
     pub fn incr(self: *BOTree, lnum: u32, off: i128) OutOfBoundError!void {
         if (lnum >= self.max or lnum == 0) {
-            print("set: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
+            print("incr: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
             return error.BOTreeIndexOutOfBound;
         }
         if (off == 0) {
@@ -404,17 +423,20 @@ const BOTree = struct {
         var left = true;
 
         // trace upwards
+        // invariant: subtree of node is fixed
         while (node.?.parent != null) {
             child = node.?;
             node = node.?.parent;
             if (child == node.?.left) {
                 // child is left of node and we reached child via its right node
+                // in this case child.lnum < target.lnum, hence needs to be "corrected"
                 if (!left) {
                     child.?.r_off -= off;
                 }
                 left = true;
             } else {
                 // child is right of node and we reached child via its left node
+                // in this case chidl.lnum > target.lnum, we change as required
                 if (left) {
                     child.?.r_off += off;
                 }
@@ -432,9 +454,9 @@ const BOTree = struct {
     }
 
     /// adds a new offset of 0 `after` idx, preserves tree balance
-    pub fn insert(self: *BOTree, lnum: u32) !void {
+    pub fn insertAfter(self: *BOTree, lnum: u32) !void {
         if (lnum >= self.max) {
-            print("set: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
+            print("insertAfter: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
             return error.BOTreeIndexOutOfBound;
         }
         const off = if (lnum == self.max - 1) (try get(self, lnum)) + 1 else (try get(self, lnum + 1));
@@ -489,8 +511,22 @@ const BOTree = struct {
                 node.?.r_lnum += 1;
             }
         }
+
+        // print("shifted:\n", .{});
+        // self.root.printONode();
+
         self.root = try self.root.insert_node(off, lnum + 1, 0, 0, self.allocator);
         self.max += 1;
+    }
+
+    /// remove offset at idx, preserves tree balance
+    pub fn remove(self: *BOTree, lnum: u32) !void {
+        if (lnum >= self.max or lnum == 0) {
+            print("remove: lnum: {d}, max: {d} not allowed\n", .{ lnum, self.max });
+            return error.BOTreeIndexOutOfBound;
+        }
+        // TODO
+        unreachable;
     }
 };
 
@@ -654,8 +690,8 @@ test "insert: once" {
     defer bft.deinit(testing.allocator);
 
     var r = utils.newRand();
-    const idx = if (offs.items.len != 1) r.intRangeAtMost(u32, 1, @intCast(offs.items.len - 1)) else 0;
-    try bft.insert(@intCast(idx));
+    const idx = r.intRangeAtMost(u32, 0, @intCast(offs.items.len - 1));
+    try bft.insertAfter(@intCast(idx));
 
     const new = idx + 1;
     if (new != offs.items.len) {
@@ -674,4 +710,33 @@ test "insert: once" {
     }
 
     try testing.expect(bft.root.balanced());
+}
+
+test "insert: many" {
+    const input = try utils.genInput(testing.allocator);
+    const str = input.str;
+    var offs = input.breaks;
+    defer str.deinit();
+    defer offs.deinit();
+
+    var bft = try BOTree.init(str.items, testing.allocator);
+    defer bft.deinit(testing.allocator);
+
+    for (0..256) |_| {
+        var r = utils.newRand();
+        const idx = r.intRangeAtMost(u32, 0, @intCast(offs.items.len - 1));
+        const newOff = if (idx == offs.items.len - 1) offs.getLast() + 1 else offs.items[idx + 1];
+
+        try bft.insertAfter(@intCast(idx));
+
+        try offs.insert(idx + 1, newOff);
+        for (idx + 2..offs.items.len) |i| {
+            offs.items[i] += 1;
+        }
+
+        try testing.expect(bft.root.balanced());
+        for (0..offs.items.len) |i| {
+            try expectEqual(offs.items[i], bft.get(@intCast(i)));
+        }
+    }
 }
