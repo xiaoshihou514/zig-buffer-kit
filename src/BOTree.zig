@@ -28,6 +28,8 @@ const BONode = struct {
     right: ?*BONode = null,
     /// optional parent
     parent: ?*BONode = null,
+    /// height
+    height: u8 = 1,
 
     const print_indent = 2;
 
@@ -49,7 +51,7 @@ const BONode = struct {
     }
 
     /// print structure of tree to stderr
-    pub fn printONode(node: *BONode) void {
+    fn printONode(node: *BONode) void {
         print("\n", .{});
         printHelper(node, 0);
     }
@@ -79,12 +81,12 @@ const BONode = struct {
     }
 
     /// print structure of tree to buffer
-    pub fn bufPrintONode(node: *BONode, buf: []u8) !void {
+    fn bufPrintONode(node: *BONode, buf: []u8) !void {
         _ = try bufPrintHelper(node, 0, buf);
     }
 
     /// print single node
-    pub fn printSingle(self: ?*BONode, name: []const u8) void {
+    fn printSingle(self: ?*BONode, name: []const u8) void {
         if (self == null) {
             print("{s}: null\n", .{name});
         } else {
@@ -92,7 +94,7 @@ const BONode = struct {
         }
     }
 
-    pub fn insert_node(self: *BONode, offset: u64, lnum: u32, oacc: i128, lacc: i64, allocator: Allocator) !*BONode {
+    fn insert_node(self: *BONode, offset: u64, lnum: u32, oacc: i128, lacc: i64, allocator: Allocator) !*BONode {
         const lnum_acc = lacc + self.r_lnum;
         const off_acc = oacc + self.r_off;
         if (off_acc > offset) {
@@ -124,7 +126,12 @@ const BONode = struct {
         } else {
             unreachable;
         }
-        const bf = height(self.left) - height(self.right);
+
+        // update height
+        self.height = @max(height(self.left), height(self.right)) + 1;
+
+        // preserve tree balance
+        const bf = balance_factor(self);
         if (bf > 1 and lnum < lnum_acc + self.left.?.r_lnum) {
             return self.rotate_right();
         }
@@ -142,15 +149,6 @@ const BONode = struct {
         return self;
     }
 
-    /// gets height of tree
-    pub fn height(self: ?*BONode) i64 {
-        if (self) |it| {
-            return @max(height(it.left), height(it.right)) + 1;
-        } else {
-            return 0;
-        }
-    }
-
     fn rotate_left(self: *BONode) *BONode {
         const B = self.right.?;
         const Y = B.left;
@@ -158,6 +156,10 @@ const BONode = struct {
         // rotate nodes
         B.left = self;
         self.right = Y;
+
+        // fix heights
+        self.update_height();
+        B.update_height();
 
         // fix pointers
         B.parent = self.parent;
@@ -191,6 +193,10 @@ const BONode = struct {
         A.right = self;
         self.left = Y;
 
+        // fix heights
+        self.update_height();
+        A.update_height();
+
         // fix pointers
         A.parent = self.parent;
         self.parent = A;
@@ -215,15 +221,32 @@ const BONode = struct {
         return A;
     }
 
+    fn height(self: ?*BONode) u8 {
+        if (self) |n| {
+            return n.height;
+        } else {
+            return 0;
+        }
+    }
+
+    fn balance_factor(self: *BONode) i4 {
+        const lh: i16 = height(self.left);
+        const rh: i16 = height(self.right);
+        return @intCast(lh - rh);
+    }
+
+    fn update_height(self: *BONode) void {
+        self.height = @max(height(self.left), height(self.right)) + 1;
+    }
+
     fn balanced(self: ?*BONode) bool {
-        if (self == null) {
+        if (self) |s| {
+            return (@abs(balance_factor(s))) <= 1 //
+            and balanced(s.left) //
+            and balanced(s.right);
+        } else {
             return true;
         }
-        return (@abs( //
-            height(self.?.left) - height(self.?.right) //
-        )) <= 1 //
-        and balanced(self.?.left) //
-        and balanced(self.?.right);
     }
 };
 
@@ -282,12 +305,19 @@ const BOTree = struct {
         const node = try allocator.create(BONode);
         const off: i128 = offsets.items[(start + end) / 2];
         const lnum: u32 = (start + end) / 2;
+        const left = try init_tree(offsets, start, lnum, off, lnum, allocator, node);
+        const right = try init_tree(offsets, lnum + 1, end, off, lnum, allocator, node);
+        const height = 1 + @max(
+            BONode.height(left),
+            BONode.height(right),
+        );
         node.* = BONode{
             .r_off = off - parent_r_off,
             .r_lnum = lnum - parent_r_lnum,
-            .left = try init_tree(offsets, start, lnum, off, lnum, allocator, node),
-            .right = try init_tree(offsets, lnum + 1, end, off, lnum, allocator, node),
+            .left = left,
+            .right = right,
             .parent = parent,
+            .height = height,
         };
         return node;
     }
@@ -393,6 +423,7 @@ const BOTree = struct {
             node.?.r_off += delta;
         }
     }
+
     /// increments start of interval of line `lnum`
     pub fn incr(self: *BOTree, lnum: u32, off: i128) OutOfBoundError!void {
         if (lnum >= self.max or lnum == 0) {
@@ -513,9 +544,6 @@ const BOTree = struct {
                 node.?.r_lnum += 1;
             }
         }
-
-        // print("shifted:\n", .{});
-        // self.root.printONode();
 
         self.root = try self.root.insert_node(off, lnum + 1, 0, 0, self.allocator);
         self.max += 1;
